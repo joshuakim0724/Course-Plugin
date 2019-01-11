@@ -1,25 +1,3 @@
-###############################################################################
-#
-# NOTE: If you don't need this file, feel free to delete it! It only serves to
-#   be a demo of how plugins should be made.
-#
-#
-# Hey there!
-#
-# This is dummy.py, or the whirlwind tour of what JshBot 0.4.x is about, and
-#   how it can be used.
-#
-# The file demonsrates how to create new commands with standard syntax,
-#   as well as shortcuts and help (manual entry).
-#
-# There is also a demonstration on how get_response() should be used, and how
-#   to read a parsed result.
-#
-# Lastly, there is a small amount of demo code to show off that plugins can
-#   define standard events from discord.Client, and they will be called
-#   appropriately.
-#
-###############################################################################
 
 import asyncio
 
@@ -28,9 +6,12 @@ from jshbot.exceptions import ConfiguredBotException
 from jshbot.commands import (
     Command, SubCommand, Shortcut, ArgTypes, Attachment, Arg, Opt, MessageTypes, Response)
 
-__version__ = '0.2.0'
-CBException = ConfiguredBotException('Dummy')
+__version__ = '0.1.0'
+CBException = ConfiguredBotException('Course Checker')
 uses_configuration = True
+course_url_template = (
+    "http://courses.illinois.edu/cisapp/explorer/schedule/{year}/{semester}/"
+    "{{department}}{{course_number}}{{crn}}.xml{{detail}}")
 
 
 # Apply this decorator to every function that returns a list of new commands
@@ -40,95 +21,22 @@ def get_commands(bot):
     new_commands = []
 
     new_commands.append(Command(
-        'mycommand', subcommands=[
+        'crn', subcommands=[
             SubCommand(
-                Opt('myoption'),
-                doc='This is a simple command with a single required option.'),
+                Opt('pending'),
+                doc='Lists courses you are waiting on.'),
             SubCommand(
-                Opt('custom', optional=True),
-                Opt('attached', optional=True, attached='attached argument'),
-                doc='This has two different optional options, one without an attached '
-                    'parameter, and the other requiring an attached parameter.'),
+                Opt('watch'),
+                Arg('department code'),
+                Arg('course number')
+                Arg('crn', argtype=ArgTypes.SINGLE),
+                doc='Monitors a CRN and lets you know if it opens up.'),
             SubCommand(
-                Opt('trailing'),
-                Arg('arg 1'),
-                Arg('arg 2'),
-                Arg('arg 3', argtype=ArgTypes.SPLIT, additional='more args'),
-                doc='This command requires a lot of trailing arguments.'),
-            SubCommand(
-                Opt('grouped'),
-                Arg('grouped arguments', argtype=ArgTypes.MERGED),
-                doc='This will group all given arguments as a single string.'),
-            SubCommand(
-                Opt('complex', attached='attached'),
-                Opt('other', optional=True, attached='also required'),
-                Arg('arg 1'),
-                Arg('arg 2', argtype=ArgTypes.SPLIT_OPTIONAL, additional='more args'),
-                doc='The complex option has a required attached parameter, and the '
-                    '\'other\' option also has a required attached parameter if '
-                    '\'other\' is included. Additionally, there will be a requirement '
-                    'of at least 1 trailing argument.'),
-            SubCommand(
-                Opt('marquee'),
-                Arg('text', argtype=ArgTypes.MERGED,
-                    check=lambda b, m, v, *a: len(v) <= 100,
-                    check_error="Marquee message must be less than 100 characters long."),
-                doc='Creates a marquee that loops 3 times.')],
-        shortcuts=[
-            Shortcut(
-                'complex', 'complex {attached} other {other} {arg 1} {arg 2}',
-                Arg('attached'), Arg('other'), Arg('arg 1'),
-                Arg('arg 2', argtype=ArgTypes.SPLIT_OPTIONAL)),
-            Shortcut(
-                'marquee', 'marquee {text}', Arg('text', argtype=ArgTypes.MERGED))],
-        description='Your command description here.',
-        other='This text is optional - it just shows up after everything '
-              'else. Quick note, all of the commands here can only be used by '
-              'bot moderators or above, as indicated by elevated_level. A '
-              'level of 2 would mean only server owners or above can use the '
-              'command, and a level of 3 would restrict the command to only '
-              'the bot owners.',
-        elevated_level=1, category='demo'))
-
-    new_commands.append(Command(
-        'myothercommand', subcommands=[
-            SubCommand(
-                Arg('text', argtype=ArgTypes.MERGED_OPTIONAL),
-                doc='This traps all further commands from being executed.'),
-            SubCommand(
-                Opt('order'), Opt('matters'),
-                doc='It is impossible to access this command because the first '
-                    'subcommand will always be satisfied first. Order of the '
-                    'subcommand matters!'),
-            SubCommand(
-                Opt('sample'), Opt('foo'), Opt('bar'),
-                doc='Also impossible to access. This subcommand just adds some '
-                    'keywords to the command.')],
-        description='Only bot owners can see this text!',
-        other='Note that no shortcuts were defined. They, too, are optional. '
-              'Also, this command is hidden, which means that only the bot '
-              'owners can see this command listed from the help command. '
-              'However, unless the command is configured with an elevated '
-              'permissions level, any user can still execute the command. '
-              'Users still will not be able to see the specific help for this '
-              'command, though. Lastly, this command is disabled in DMs.',
-        hidden=True, allow_direct=False, category='demo'))
-
-    new_commands.append(Command(
-        'notify', subcommands=[
-            SubCommand(
-                Arg('text', argtype=ArgTypes.MERGED),
-                doc='Notify the owners with some text!')],
-        other='This command uses a custom function. It is called with the '
-              'same arguments as get_response. The command will show up to '
-              'all users in the help command, but can only be used by server '
-              'owners, as it is disallowed in direct messages.',
-        elevated_level=2, allow_direct=False, function=custom_notify,
-        category='demo'))
-
-    new_commands.append(Command(
-        'wait', other='Use this command to demo the wait_for functionality', category='demo'))
-
+                Opt('course'),
+                Arg('department code'),
+                Arg('course number', argtype=ArgTypes.SINGLE)
+                doc='Shows details on the given course.')],
+        description='UIUC course explorer tools.'
     return new_commands
 
 
