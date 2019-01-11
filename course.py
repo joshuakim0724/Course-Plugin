@@ -30,12 +30,12 @@ def get_commands(bot):
                 Opt('watch'),
                 Arg('department code'),
                 Arg('course number')
-                Arg('crn', argtype=ArgTypes.SINGLE),
+                Arg('crn'),
                 doc='Monitors a CRN and lets you know if it opens up.'),
             SubCommand(
                 Opt('course'),
                 Arg('department code'),
-                Arg('course number', argtype=ArgTypes.SINGLE)
+                Arg('course number')
                 doc='Shows details on the given course.')],
         description='UIUC course explorer tools.'
     return new_commands
