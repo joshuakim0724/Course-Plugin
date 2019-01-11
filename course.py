@@ -1,7 +1,8 @@
-
 import asyncio
 
-from jshbot import utilities, configurations, plugins, logger
+import xml.etree.ElementTree as ElementTree
+
+from jshbot import utilities, configurations, plugins, logger, data
 from jshbot.exceptions import ConfiguredBotException
 from jshbot.commands import (
     Command, SubCommand, Shortcut, ArgTypes, Attachment, Arg, Opt, MessageTypes, Response)
@@ -39,227 +40,282 @@ def get_commands(bot):
         description='UIUC course explorer tools.'
     return new_commands
 
-
-async def get_response(bot, context):
-    """Gets a response given the parsed input.
-    context attributes:
-    bot -- A reference to the bot itself.
-    message -- The discord.message object obtained from on_message.
-    base -- The base command name that immediately follows the invoker.
-    subcommand -- The subcommand that matched the parameters.
-    index -- The index of the found subcommand.
-    options -- A dictionary representing the options and potential positional
-        arguments that are attached to them.
-    arguments -- A list of strings that follow the syntax of the blueprint
-        index for arguments following the options.
-    keywords -- Another list of strings that holds all option keywords. These
-        can be used to prevent database conflicts with user commands.
-    cleaned_content -- Simply the message content without the invoker.
-    """
-
-    # This is what the bot will say when it returns from this function.
-    # The response object can be manipulated in many ways. The attributes of
-    #   the response will be passed into the send function.
-    response = Response()
-    response.content = ''  # Default
-
-    # Set to True if you want your message read with /tts (not recommended).
-    response.tts = False  # Default
-
-    # The message type dictates how the bot handles your returned message.
-    #
-    # NORMAL - Normal. The issuing command can be edited.
-    # PERMANENT - Message is not added to the edit dictionary.
-    # REPLACE - Deletes the issuing command after 'extra' seconds. Defaults
-    #   to 0 seconds if 'extra' is not given.
-    # ACTIVE - The message reference is passed back to the function defined
-    #   with 'extra_function'. If 'extra_function' is not defined, it will call
-    #   plugin.handle_active_message.
-    # INTERACTIVE - Assembles reaction buttons given by extra['buttons'] and
-    #   calls 'extra_function' whenever one is pressed.
-    # WAIT - Wait for event. Calls 'extra_function' with the result, or None
-    #   if the wait timed out.
-    #
-    # Only the NORMAL message type can be edited.
-    response.message_type = MessageTypes.NORMAL  # Default
-
-    # The extra variable is used for some message types.
-    response.extra = None  # Default
-
-    # Initially, check to make sure that you've matched the proper command.
-    # If there is only one command specified, this may not be necessary.
-    index, options, arguments = context.index, context.options, context.arguments
-    if context.base == 'mycommand':
-
-        # Then, the subcommand index will tell you which command syntax was
-        #   satisfied. The order is the same as was specified initially.
-        if index == 0:  # myoption
-            response.content = "You called the first subcommand!"
-            # Do other stuff...
-
-        elif index == 1:  # custom/attached
-            # To see if an optional option was included in the command, use:
-            if 'custom' in options:
-                response.content += "You included the \"custom\" flag!\n"
-                # Do stuff relevant to this flag here...
-
-            # To get the parameter attached to an option, simply access it from
-            #   the options dictionary.
-            if 'attached' in options:
-                response.content += "The attached parmeter: {}\n".format(options['attached'])
-
-            # In case somebody was looking for the help...
-            if len(options) == 0:
-                invoker = utilities.get_invoker(bot, guild=context.guild)
-                response.content += ("You didn't use either flag...\n"
-                                     "For help, try `{}help mycommand`".format(invoker))
-
-        elif index == 2:  # trailing arguments
-            # If arguments are specified as trailing, they will be in a list.
-            response.content += "The list of trailing arguments: {}".format(arguments)
-
-        elif index == 3:  # grouped arguments
-            # All arguments are grouped together as the first element
-            response.message_type = MessageTypes.PERMANENT
-            response.content = ("You can't edit your command here.\n"
-                                "Single grouped argument: {}").format(arguments[0])
-
-        elif index == 4:  # complex
-            # This mixes elements of both examples seen above.
-            response.content = ("The argument attached to the complex "
-                                "option: {}").format(options['complex'])
-            if 'other' in options:
-                response.content += "\nThe other option has attached: {}".format(options['other'])
-            response.content += "\nLastly, the trailing arguments: {}".format(arguments)
-
-        elif index == 5:  # (Very slow) marquee
-            # This demonstrates the active message type.
-            # Check active_marquee to see how it works.
-            response.message_type = MessageTypes.ACTIVE
-            response.extra_function = active_marquee  # The function to call
-            response.extra = arguments[0]  # The text to use
-            response.content = "Setting up marquee..."  # This will be shown first
-
-    # Here's another command base.
-    elif context.base == 'myothercommand':
-
-        if index == 0:  # keyword checker
-            text = arguments[0]
-            if not text:
-                response.content = "You didn't say anything...\n"
-            else:
-                response.content = "This is your input: {}\n".format(text)
-                if text in context.keywords:
-                    response.content += "Your input was in the list of keywords!\n"
-                else:
-                    response.content += ("Your input was not in the list of keywords. "
-                                         "They are: {}\n").format(context.keywords)
-            response.message_type = MessageTypes.PERMANENT
-            response.delete_after = 15
-            response.content += "This message will self destruct in 15 seconds."
-
-        else:  # impossible command???
-            raise CBException("This is a bug! You should never see this message.")
-
-    elif context.base == 'wait':
-        response.message_type = MessageTypes.WAIT
-        # The extra attribute should consist of a dictionary containing the
-        #   event and any other kwargs. Most notably, you will likely want to
-        #   define the check used in wait_for.
-        response.extra_function = custom_interaction
-        response.extra = {
-            'event': 'message',
-            'kwargs': {
-                'timeout': 30,  # Default 300
-                'check': lambda m: m.author == context.author,
-            }
-        }
-        response.content = "Say something, {}.".format(context.author)
-
-    return response
+def _get_watching_courses(bot, author):
+    """Returns a list of courses the author """
+    course_dictionary = data.get(bot, __name__, 'courses', default={})
+    watching = []
+    for course_crn, course_values in course_dictionary.items():
+        if author.id in course_values['notify_list']:
+            watching.append(
+                course_values['course_title'] + ' ({})'.format(course_crn))
+    return watching
 
 
-async def custom_notify(bot, context):
-    """This is only called with the notify command.
-    This function is called with the same arguments as get_response.
-    """
-    await utilities.notify_owners(
-            bot, '{0.author} from {0.guild}: {0.arguments[0]}'.format(context))
-    return Response(content="Notified the owners with your message!")
-
-
-async def custom_interaction(bot, context, response, result):
-    """This is the function defined for the wait command.
-    'context' and 'response' are familiar parameters used before. The only
-    difference is that the response message can now be obtained via
-    response.message
-    """
-    if result is None:  # Timed out
-        edit = 'You took too long to respond...'
-    elif result.content:
-        edit = 'You replied with "{}"'.format(result.content[:100])
+def list_watching_courses(bot, author):
+    """Shows the courses that the author is watching as a string."""
+    watching = _get_watching_courses(bot, author)
+    if watching:
+        return "You are watching:\n{}".format('\n'.join(watching))
     else:
-        edit = 'You did not reply with any content text!'
-    await response.message.edit(content=edit)
+        return "You are not watching any courses right now."
 
 
-async def active_marquee(bot, context, response):
-    """Handle the marquee active message."""
-
-    # Setup text with whitespace padding
-    total_length = 40 + len(response.extra)
-    text = '{0: ^{1}}'.format(response.extra, total_length)
-    for it in range(3):
-        for move in range(total_length - 20):
-            moving_text = '`|{:.20}|`'.format(text[move:])
-            await asyncio.sleep(1)  # Evenly distribute ratelimit
-            await response.message.edit(content=moving_text)
-
-    # When the marquee is done, just display the text
-    await asyncio.sleep(1)
-    await response.message.edit(content=response.extra)
-
-
-@plugins.permissions_spawner
-def setup_permissions(bot):
-    """Use this decorator to return a dictionary of required permissions."""
-    return {
-        'read_messages': "This is a dummy additional permission.",
-        'change_nickname': "This allows the bot to change its own nickname."
-    }
-
-
-# If necessary, events can be listened for using the plugins.listen_for decorator.
-#   These events include everything discord.py provides (see the event reference in the docs).
-#
-#   Additionally, the bot provides a few extra events:
-#   - bot_on_command (context):
-#       A command is about to be called (the context has been built)
-#   - bot_on_response (response, context):
-#       A command has been executed, and a response was created
-#   - bot_on_user_ratelimit (author):
-#       The author has issued too many commands (global command ratelimit exceeded)
-#   - bot_on_exception (error, message):
-#       A BotException was caught
-#   - bot_on_discord_exception (error, message):
-#       A discord.py exception caught (likely messages were too long)
-#   - bot_on_uncaught_exception (error, message):
-#       An uncaught exception was raised (internal error)
-#   - bot_on_ready_boot:
-#       The bot has started up for the first time (or the plugin was reloaded)
-#
-#   Be sure to include the bot argument first for these event functions!
+async def watch_course(bot, author, *args):
+    """Adds the given user and course to the notification loop."""
+    course_data = await _get_data(bot, *args)
+    course_title = _get_course_title(course_data)
+    if 'Open' in course_data.find('enrollmentStatus').text:
+        raise BotException(EXCEPTION, "CRN is currently open.")
+    course_dictionary = data.get(
+        bot, __name__, 'courses', create=True, default={})
+    crn = course_data.get('id')
+    if crn in course_dictionary:  # Course already exists
+        if author.id in course_dictionary[crn]['notify_list']:
+            course_dictionary[crn]['notify_list'].remove(author.id)
+            if not course_dictionary[crn]['notify_list']:
+                del course_dictionary[crn]
+            return "Removed course from the watch list."
+        else:
+            if len(_get_watching_courses(bot, author)) >= configurations.get(
+                    bot, __name__, 'course_limit'):
+                raise BotException(
+                    EXCEPTION, "You are watching too many courses.")
+            course_dictionary[crn]['notify_list'].append(author.id)
+    else:  # Course does not exist
+        if len(_get_watching_courses(bot, author)) >= configurations.get(
+                bot, __name__, 'course_limit'):
+            raise BotException(
+                EXCEPTION, "You are watching too many courses.")
+        course_dictionary[crn] = {
+            "notify_list": [author.id],
+            "course_title": course_title,
+            "identity": args
+        }
+    return "Course '{}' added to the watch list.".format(course_title)
 
 
-@plugins.listen_for('on_message_edit')
-async def show_edits(bot, before, after):
-    if (before.author != bot.user and
-            configurations.get(bot, __name__, key='show_edited_messages')):
-        logger.info("Somebody edited their message from '{0}' to '{1}'.".format(
-            before.content, after.content))
+async def list_search(bot, *args):
+    """Searches for course information given the number of arguments."""
+    if len(args) > 3:
+        raise BotException(EXCEPTION, "Too many arguments.")
+    elif len(args) == 3:
+        return await get_crn_info(bot, *args)
+
+    course_data = await _get_data(bot, *args)
+    code, label = course_data.get('id'), course_data.find('label').text
+    response_list = ['***`{0}: {1}`***'.format(code, label)]
+    if len(args) == 2:  # Course number (list CRNs)
+        section_list = course_data.find(
+            'detailedSections').findall('detailedSection')
+        if not section_list:
+            raise BotException(EXCEPTION, "Course has no sections.")
+        for section_data in section_list:
+            section_details = _get_section_details(section_data)
+            response_list.append(
+                '**{crn}:** {section} ({type}), {start}-{end} {days}'.format(
+                    **section_details))
+
+    else:  # Department (list courses)
+        course_list = course_data.find('courses').findall('course')
+        if not course_list:
+            raise BotException(EXCEPTION, "Department has no courses.")
+        for course in course_list:
+            response_list.append('**{0}:** {1}'.format(
+                course.get('id'), course.text))
+
+    return '\r\n'.join(response_list)
 
 
-@plugins.listen_for('bot_on_ready_boot')
-async def demo_on_boot(bot):
-    """This is called only once every time the bot is started (or reloaded)."""
-    logger.info("demo_on_boot was called from dummy.py!")
+async def _get_data(bot, department, course_number='', crn=''):
+    department = department.upper()
+    if course_number:
+        detail = '?mode=detail'
+        try:
+            course_number = str(int(course_number))
+        except:
+            raise BotException(EXCEPTION, "Course number is not a number.")
+        if crn:
+            try:
+                crn = str(int(crn))
+            except:
+                raise BotException(EXCEPTION, "CRN is not a number.")
+    else:
+        detail = ''
+    complete_url = course_url_template.format(
+        department=department,
+        course_number='/'+course_number if course_number else '',
+        crn='/'+crn if crn else '', detail=detail)
+
+    status, text = await utilities.get_url(bot, complete_url)
+    if status == 404:  # TODO: Suggest what wasn't found
+        raise BotException(EXCEPTION, "Course not found.", status)
+    elif status != 200:
+        raise BotException(EXCEPTION, "Something bad happened.", status)
+    try:
+        return ElementTree.fromstring(text)
+    except Exception as e:
+        raise BotException(EXCEPTION, "The XML could not be parsed.", e)
+
+
+async def get_course_description(bot, *args):
+    """Gets course description from the given arguments."""
+    course_data = await _get_data(bot, *args)
+    title = _get_course_title(course_data, course_list=True)
+    description = {}
+    attributes = [
+        ('description', 'description'),
+        ('sectionDegreeAttributes', 'type'),
+        ('courseSectionInformation', 'restrictions'),
+        ('classScheduleInformation', 'notes')]
+    for attribute, key in attributes:
+        current = course_data.find(attribute)
+        description[key] = 'n/a' if current is None else current.text
+    return (
+        '***`{0}`***\n**Description:** {description}\n**Type:** {type}\n'
+        '**Restrictions:** {restrictions}\n**Notes:** {notes}').format(
+            title, **description)
+
+
+def _get_course_title(course_data, course_list=False):
+    if course_list:
+        return '{0}: {1}'.format(
+            course_data.get('id'), course_data.find('label').text)
+    else:
+        parent_data = course_data.find('parents')
+        return '{0} {1}: {2}'.format(
+            parent_data.find('subject').get('id'),
+            parent_data.find('course').get('id'),
+            parent_data.find('course').text)
+
+
+def _get_section_details(section_data):
+    course_details = {}
+    meeting_data = section_data.find('meetings').find('meeting')
+    attributes = [
+        ('type', 'type'), ('start', 'start'), ('end', 'end'),
+        ('daysOfTheWeek', 'days'), ('roomNumber', 'room'),
+        ('buildingName', 'building')]
+    for attribute, key in attributes:
+        current = meeting_data.find(attribute)
+        course_details[key] = 'n/a' if current is None else current.text
+    course_details['section'] = (
+        section_data.find('sectionNumber').text
+        if section_data.find('sectionNumber') is not None else 'n/a')
+    course_details['status'] = (
+        section_data.find('enrollmentStatus').text
+        if section_data.find('enrollmentStatus') is not None else 'n/a')
+    instructors = meeting_data.find('instructors').findall('instructor')
+    course_details['instructors'] = ', '.join(
+        '"{}"'.format(instructor.text) for instructor in instructors)
+    notes = section_data.find('sectionNotes')
+    if notes is None:
+        notes = section_data.find('sectionText')
+    if notes is None:
+        notes = "None provided."
+    elif section_data.find('sectionText'):  # Additional notes
+        notes += ' ({})'.format(section_data.find('sectionText').text)
+    else:
+        notes = notes.text
+    course_details['notes'] = notes
+    course_details['crn'] = section_data.get('id')
+
+    return course_details
+
+
+async def get_crn_info(bot, *args):
+    """Gets course information given a CRN."""
+    course_data = await _get_data(bot, *args)
+    course_title = _get_course_title(course_data)
+    section_details = _get_section_details(course_data)
+
+    return (
+        '***`{0}`***\n**Section:** {section}\n**Type:** {type}\n**Meets:** '
+        '{days} {start} to {end} in {building} {room}\n**Instructors:** '
+        '{instructors}\n**Status:** {status}\n**Notes:** {notes}').format(
+            course_title, **section_details)
+
+
+async def _notify_users(bot, course_values, notification, urgent=False):
+    """Notifies course followers of a message."""
+    for user_id in course_values['notify_list']:
+        user = data.get_member(bot, user_id)
+        await bot.send_message(user, notification)
+        if urgent:
+            for it in range(5):
+                await bot.send_message(user, ":warning:")
+                await asyncio.sleep(1)
+
+
+async def get_response(
+        bot, message, base, blueprint_index, options, arguments,
+        keywords, cleaned_content):
+    response, tts, message_type, extra = ('', False, 0, None)
+
+    if blueprint_index == 0:  # pending
+        response = list_watching_courses(bot, message.author)
+    elif blueprint_index == 1:  # watch
+        response = await watch_course(bot, message.author, *arguments)
+    elif blueprint_index == 2:  # course
+        response = await get_course_description(bot, *arguments)
+    elif blueprint_index == 3:  # info
+        response = await list_search(bot, *arguments)
+
+    return (response, tts, message_type, extra)
+
+
+async def bot_on_ready_boot(bot):
+    """Notifies user when a course opens up every few minutes."""
+    global course_url_template
+    course_url_template = course_url_template.format(
+        **configurations.get(bot, __name__))
+    while True:
+        course_dictionary = data.get(bot, __name__, 'courses', default={})
+
+        crns_to_remove = []
+        for course_crn, course_values in course_dictionary.items():
+            try:
+                course_data = await _get_data(bot, *course_values['identity'])
+            except Exception as e:
+                logging.error("Failed to retrieve the course: " + str(e))
+                if (isinstance(e.error_other, tuple) and
+                        e.error_other[0] == 404):
+                    logging.debug("Notifying watchers of missing course.")
+                    crns_to_remove.append(course_crn)
+                    await _notify_users(
+                        bot, course_values,
+                        "{0[course_title]} ({1}) was not found. It may have "
+                        "been de-listed from the courses page. Please check "
+                        "to see if a section was changed. (You will be "
+                        "removed from the watch list for this course)".format(
+                            course_values, course_crn))
+                await asyncio.sleep(30)
+                continue
+            try:
+                status = course_data.find('enrollmentStatus').text
+            except:
+                status = ''
+                logging.error(
+                    "There is no enrollment status for {}.".format(course_crn))
+            if 'Open' in status:
+                crns_to_remove.append(course_crn)
+                if 'Restricted' in status:  # Open, but restricted
+                    restriction = course_data.find('sectionNotes')
+                    if restriction is None:
+                        restriction = course_data.find('sectionText')
+                    if restriction is None:
+                        restriction = "None provided."
+                    else:
+                        restriction = restriction.text
+                    notification = " (Restriction: {})".format(restriction)
+                else:  # Open
+                    notification = " (No listed restrictions)"
+                await _notify_users(
+                    bot, course_values,
+                    "{0[course_title]} ({1}) is now open{2}".format(
+                        course_values, course_crn, notification), urgent=True)
+            await asyncio.sleep(1)
+
+        for crn in crns_to_remove:
+            del course_dictionary[crn]
+
+        await asyncio.sleep(5*60)
